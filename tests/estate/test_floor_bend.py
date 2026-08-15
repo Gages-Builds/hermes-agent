@@ -15,6 +15,7 @@ Runs standalone (`python3 tests/estate/test_floor_bend.py`) as well as under pyt
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import subprocess
@@ -56,26 +57,41 @@ def test_writeback_never_touches_claude_code(tmp_path=None):
     assert before == after, "the bend wrote to Claude Code's real credential file"
 
 
+def _live_string_literals() -> list:
+    """Every string constant in the adapter that is NOT a docstring.
+
+    Scanning raw source text is wrong here: our own stubs describe the deleted
+    upstream behaviour in their docstrings, which a plain substring match reads as
+    the behaviour itself. Comments never enter the AST, and docstrings are dropped
+    explicitly, so what remains is only string data real code would use.
+    """
+    tree = ast.parse(inspect.getsource(aa))
+    docstrings = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and body:
+            first = body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                docstrings.add(id(first.value))
+    return [
+        n.value for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings
+    ]
+
+
 def test_no_credential_reading_source_remains(tmp_path=None):
-    """No severed body may come back via a rebase: check the source text itself."""
-    src = inspect.getsource(aa)
-    for banned in ("find-generic-password", "claudeAiOauth"):
-        live = [
-            ln for ln in src.splitlines()
-            if banned in ln and not ln.strip().startswith("#") and '"""' not in ln
-        ]
-        assert not live, f"live code referencing {banned!r} is back: {live}"
+    """No severed body may come back via a rebase."""
+    live = _live_string_literals()
+    for banned in ("find-generic-password", "claudeAiOauth", "Claude Code-credentials"):
+        hits = [s for s in live if banned in s]
+        assert not hits, f"live code referencing {banned!r} is back: {hits}"
 
 
 def test_user_agent_does_not_impersonate_claude_code(tmp_path=None):
     """We must identify as HermesAgent, never as the official CLI."""
-    src = inspect.getsource(aa)
-    live = [
-        ln for ln in src.splitlines()
-        if "claude-code/" in ln and "user-agent" in ln.lower()
-        and not ln.strip().startswith("#")
-    ]
-    assert not live, f"claude-code user-agent impersonation is back: {live}"
+    hits = [s for s in _live_string_literals() if "claude-code/" in s]
+    assert not hits, f"claude-code user-agent impersonation is back: {hits}"
 
 
 if __name__ == "__main__":
