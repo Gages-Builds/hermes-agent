@@ -909,8 +909,11 @@ def build_anthropic_client(
         kwargs["auth_token"] = api_key
         kwargs["default_headers"] = {
             "anthropic-beta": ",".join(all_betas),
-            "user-agent": f"claude-code/{_get_claude_code_version()} (external, cli)",
-            "x-app": "cli",
+            # ESTATE BEND (bead gage-ifx4i): upstream sent
+            #   user-agent: claude-code/<ver> (external, cli)  +  x-app: cli
+            # to impersonate the official CLI -- its own comment at the top of this
+            # file notes Anthropic validates that version. Identify honestly instead.
+            "user-agent": f"HermesAgent/{_HERMES_VERSION}",
         }
     else:
         # Regular API key → x-api-key header + common betas
@@ -982,129 +985,49 @@ def build_anthropic_bedrock_client(region: str):
 
 
 def _read_claude_code_credentials_from_keychain() -> Optional[Dict[str, Any]]:
-    """Read Claude Code OAuth credentials from the macOS Keychain.
-
-    Claude Code >=2.1.114 stores credentials in the macOS Keychain under the
-    service name "Claude Code-credentials" rather than (or in addition to)
-    the JSON file at ~/.claude/.credentials.json.
-
-    The password field contains a JSON string with the same claudeAiOauth
-    structure as the JSON file.
-
-    Returns dict with {accessToken, refreshToken?, expiresAt?} or None.
+    """DELETED by the estate. Upstream shelled out to the macOS Keychain
+    (`security find-generic-password -s "Claude Code-credentials"`) to read the
+    subscription login. Always returns None.
     """
-    if platform.system() != "Darwin":
-        return None
-
-    try:
-        # Read the "Claude Code-credentials" generic password entry
-        result = subprocess.run(
-            ["security", "find-generic-password",
-             "-s", "Claude Code-credentials",
-             "-w"],
-            capture_output=True,
-            text=True, encoding='utf-8', errors='replace',
-            timeout=5,
-            stdin=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        logger.debug("Keychain: security command not available or timed out")
-        return None
-
-    if result.returncode != 0:
-        logger.debug("Keychain: no entry found for 'Claude Code-credentials'")
-        return None
-
-    raw = result.stdout.strip()
-    if not raw:
-        return None
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        logger.debug("Keychain: credentials payload is not valid JSON")
-        return None
-
-    oauth_data = data.get("claudeAiOauth")
-    if oauth_data and isinstance(oauth_data, dict):
-        access_token = oauth_data.get("accessToken", "")
-        if access_token:
-            return {
-                "accessToken": access_token,
-                "refreshToken": oauth_data.get("refreshToken", ""),
-                "expiresAt": oauth_data.get("expiresAt", 0),
-                "source": "macos_keychain",
-            }
-
+    # ESTATE BEND (bead gage-ifx4i) -- CONSTITUTION section 4.
+    # Upstream borrowed the Anthropic subscription credential that Claude Code
+    # owns and then spoke to Anthropic wearing Claude Code's identity. Routing a
+    # subscription through a third-party harness is what the floor forbids and
+    # what Anthropic bans accounts for. The body is deleted rather than gated:
+    # upstream's only guard was `provider == "anthropic"`, one config edit away
+    # from firing. None is exactly what upstream returned when it found no
+    # credential, so every existing call site handles this unchanged.
     return None
 
 
 def _read_claude_code_credentials_from_file() -> Optional[Dict[str, Any]]:
-    """Read Claude Code OAuth credentials from ~/.claude/.credentials.json.
-
-    Returns dict with {accessToken, refreshToken?, expiresAt?, source} or None.
+    """DELETED by the estate. Upstream read ~/.claude/.credentials.json
+    directly. Always returns None.
     """
-    cred_path = Path.home() / ".claude" / ".credentials.json"
-    if not cred_path.exists():
-        return None
-    try:
-        data = json.loads(cred_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, IOError) as e:
-        logger.debug("Failed to read ~/.claude/.credentials.json: %s", e)
-        return None
-
-    oauth_data = data.get("claudeAiOauth")
-    if not (oauth_data and isinstance(oauth_data, dict)):
-        return None
-    access_token = oauth_data.get("accessToken", "")
-    if not access_token:
-        return None
-    return {
-        "accessToken": access_token,
-        "refreshToken": oauth_data.get("refreshToken", ""),
-        "expiresAt": oauth_data.get("expiresAt", 0),
-        "source": "claude_code_credentials_file",
-    }
+    # ESTATE BEND (bead gage-ifx4i) -- CONSTITUTION section 4.
+    # Upstream borrowed the Anthropic subscription credential that Claude Code
+    # owns and then spoke to Anthropic wearing Claude Code's identity. Routing a
+    # subscription through a third-party harness is what the floor forbids and
+    # what Anthropic bans accounts for. The body is deleted rather than gated:
+    # upstream's only guard was `provider == "anthropic"`, one config edit away
+    # from firing. None is exactly what upstream returned when it found no
+    # credential, so every existing call site handles this unchanged.
+    return None
 
 
 def read_claude_code_credentials() -> Optional[Dict[str, Any]]:
-    """Read refreshable Claude Code OAuth credentials.
-
-    Reads from two possible sources and reconciles them:
-      1. macOS Keychain (Darwin only) — "Claude Code-credentials" entry
-      2. ~/.claude/.credentials.json file
-
-    Selection rules when both are present:
-      - If exactly one is non-expired, prefer that one. (Handles the case
-        where Claude Code refreshes one source but not the other — observed
-        in the wild on Claude Code 2.1.x.)
-      - Otherwise, prefer the source with the later ``expiresAt`` so that
-        any subsequent refresh uses the most recent ``refreshToken``.
-
-    This intentionally excludes ~/.claude.json primaryApiKey. Opencode's
-    subscription flow is OAuth/setup-token based with refreshable credentials,
-    and native direct Anthropic provider usage should follow that path rather
-    than auto-detecting Claude's first-party managed key.
-
-    Returns dict with {accessToken, refreshToken?, expiresAt?, source} or None.
+    """DELETED by the estate. This was the single choke point every caller
+    used to obtain Claude Code's OAuth credential. Always returns None.
     """
-    kc_creds = _read_claude_code_credentials_from_keychain()
-    file_creds = _read_claude_code_credentials_from_file()
-
-    if kc_creds and file_creds:
-        kc_valid = is_claude_code_token_valid(kc_creds)
-        file_valid = is_claude_code_token_valid(file_creds)
-        if kc_valid and not file_valid:
-            return kc_creds
-        if file_valid and not kc_valid:
-            return file_creds
-        # Both valid or both expired: prefer the later expiresAt so the
-        # downstream refresh path uses the freshest refresh_token.
-        kc_exp = kc_creds.get("expiresAt", 0) or 0
-        file_exp = file_creds.get("expiresAt", 0) or 0
-        return kc_creds if kc_exp >= file_exp else file_creds
-
-    return kc_creds or file_creds
+    # ESTATE BEND (bead gage-ifx4i) -- CONSTITUTION section 4.
+    # Upstream borrowed the Anthropic subscription credential that Claude Code
+    # owns and then spoke to Anthropic wearing Claude Code's identity. Routing a
+    # subscription through a third-party harness is what the floor forbids and
+    # what Anthropic bans accounts for. The body is deleted rather than gated:
+    # upstream's only guard was `provider == "anthropic"`, one config edit away
+    # from firing. None is exactly what upstream returned when it found no
+    # credential, so every existing call site handles this unchanged.
+    return None
 
 
 def is_claude_code_token_valid(creds: Dict[str, Any]) -> bool:
@@ -1246,65 +1169,19 @@ def _write_claude_code_credentials(
     *,
     scopes: Optional[list] = None,
 ) -> None:
-    """Write refreshed credentials back to ~/.claude/.credentials.json.
-
-    The optional *scopes* list (e.g. ``["user:inference", "user:profile", ...]``)
-    is persisted so that Claude Code's own auth check recognises the credential
-    as valid.  Claude Code >=2.1.81 gates on the presence of ``"user:inference"``
-    in the stored scopes before it will use the token.
+    """DELETED by the estate. Upstream did not merely READ Claude Code's
+    credential file, it rewrote ~/.claude/.credentials.json with refreshed
+    tokens. No-op.
     """
-    cred_path = Path.home() / ".claude" / ".credentials.json"
-    try:
-        # Read existing file to preserve other fields
-        existing = {}
-        if cred_path.exists():
-            existing = json.loads(cred_path.read_text(encoding="utf-8"))
-
-        oauth_data: Dict[str, Any] = {
-            "accessToken": access_token,
-            "refreshToken": refresh_token,
-            "expiresAt": expires_at_ms,
-        }
-        if scopes is not None:
-            oauth_data["scopes"] = scopes
-        elif "claudeAiOauth" in existing and "scopes" in existing["claudeAiOauth"]:
-            # Preserve previously-stored scopes when the refresh response
-            # does not include a scope field.
-            oauth_data["scopes"] = existing["claudeAiOauth"]["scopes"]
-
-        existing["claudeAiOauth"] = oauth_data
-
-        cred_path.parent.mkdir(parents=True, exist_ok=True)
-        # Per-process random suffix avoids collisions between concurrent
-        # writers and stale leftovers from a prior crashed write.
-        _tmp_cred = cred_path.with_suffix(f".tmp.{os.getpid()}.{secrets.token_hex(4)}")
-        try:
-            # Create the temp file atomically at 0o600. The previous
-            # write_text + post-replace chmod opened a TOCTOU window where
-            # both the temp file and the destination briefly inherited the
-            # process umask (commonly 0o644 = world-readable), exposing
-            # Claude Code OAuth tokens to other local users between create
-            # and chmod. Mirrors agent/google_oauth.py (#19673) and
-            # tools/mcp_oauth.py (#21148). Parent dir (~/.claude/) is
-            # owned by Claude Code itself, so we leave its mode alone.
-            fd = os.open(
-                str(_tmp_cred),
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                stat.S_IRUSR | stat.S_IWUSR,
-            )
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(existing, fh, indent=2)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(_tmp_cred, cred_path)
-        except OSError:
-            try:
-                _tmp_cred.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
-    except (OSError, IOError) as e:
-        logger.debug("Failed to write refreshed credentials: %s", e)
+    # ESTATE BEND (bead gage-ifx4i) -- CONSTITUTION section 4.
+    # Upstream borrowed the Anthropic subscription credential that Claude Code
+    # owns and then spoke to Anthropic wearing Claude Code's identity. Routing a
+    # subscription through a third-party harness is what the floor forbids and
+    # what Anthropic bans accounts for. The body is deleted rather than gated:
+    # upstream's only guard was `provider == "anthropic"`, one config edit away
+    # from firing. None is exactly what upstream returned when it found no
+    # credential, so every existing call site handles this unchanged.
+    return None
 
 
 def _resolve_claude_code_token_from_credentials(creds: Optional[Dict[str, Any]] = None) -> Optional[str]:
